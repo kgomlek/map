@@ -1,0 +1,13 @@
+{
+  "name": "EV Router - Planificateur de trajets électriques",
+  "short_name": "EV Router",
+  "description": "Trouvez les stations de recharge pour votre véhicule électrique",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#3b82f6",
+  "orientation": "portrait-primary",
+  "icons": []
+}
+
+
