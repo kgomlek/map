@@ -15,7 +15,7 @@ import { RouteInfo } from '../ui/RouteInfo';
 import { X, Navigation } from 'lucide-react';
 
 export function MobileSheet() {
-  const { viewMode, route, clearRoute } = useAppStore();
+  const { viewMode, route, clearRoute, stations, nearbyStations, setSelectedStation } = useAppStore();
   const [open, setOpen] = useState(true);
 
   const getTitle = () => {
@@ -38,7 +38,12 @@ export function MobileSheet() {
         return (
           <>
             {route && <RouteInfo route={route} />}
-            <StationList />
+            {stations.length > 0 && (
+              <StationList 
+                stations={stations} 
+                onStationClick={setSelectedStation}
+              />
+            )}
             {route && (
               <button
                 onClick={clearRoute}
@@ -52,7 +57,12 @@ export function MobileSheet() {
         );
       case 'IDLE':
       default:
-        return <StationList />;
+        return (
+          <StationList 
+            stations={nearbyStations} 
+            onStationClick={setSelectedStation}
+          />
+        );
     }
   };
 
