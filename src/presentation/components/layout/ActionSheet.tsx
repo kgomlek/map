@@ -12,9 +12,12 @@ import { useAppStore } from '@/application/store/useAppStore';
 import { StationCarousel } from '../ui/StationCarousel';
 import { StationList } from '../ui/StationList';
 import { StationDetail } from '../ui/StationDetail';
+import { NavigationTopBar } from '../ui/NavigationTopBar';
+import { NavigationBottomBar } from '../ui/NavigationBottomBar';
 import { Button } from '../ui/button';
-import { Navigation, X, MapPin, Loader2 } from 'lucide-react';
+import { Navigation, X, MapPin, Loader2, Navigation2 } from 'lucide-react';
 import { formatDistance, formatDuration } from '@/lib/utils';
+import { useNavigation } from '@/presentation/hooks/useNavigation';
 
 export function ActionSheet() {
   const { 
@@ -27,8 +30,12 @@ export function ActionSheet() {
     selectedStation,
     searchNearbyStations, 
     isLoading, 
-    setSelectedStation 
+    setSelectedStation,
+    setViewMode
   } = useAppStore();
+
+  // Hook de navigation pour le mode NAVIGATION
+  const navigation = useNavigation();
   
   // Sheet should always be open, starting in peeking state
   const [isOpen, setIsOpen] = useState(true);
@@ -42,6 +49,8 @@ export function ActionSheet() {
         return 'İstasyon Detayları';
       case 'ROUTING':
         return 'Rota Bilgileri';
+      case 'NAVIGATION':
+        return 'Navigasyon';
       case 'IDLE':
       default:
         return 'Yakındaki İstasyonlar';
@@ -50,6 +59,21 @@ export function ActionSheet() {
 
   // Render peeking content (visible at 12%)
   const renderPeekingContent = () => {
+    if (viewMode === 'NAVIGATION' && navigation.currentStep) {
+      return (
+        <div className="px-4 py-2">
+          <p className="text-sm font-semibold line-clamp-2">
+            {navigation.currentStep.instruction}
+          </p>
+          {navigation.distanceToNextStep > 0 && (
+            <p className="text-xs text-muted-foreground mt-1">
+              {formatDistance(navigation.distanceToNextStep)} kala
+            </p>
+          )}
+        </div>
+      );
+    }
+
     if (viewMode === 'ROUTING' && route) {
       return (
         <div className="px-4 py-2">
@@ -89,6 +113,51 @@ export function ActionSheet() {
     switch (viewMode) {
       case 'STATION_DETAIL':
         return <StationDetail />;
+
+      case 'NAVIGATION':
+        return (
+          <div className="space-y-4">
+            {/* Current Instruction Banner */}
+            {navigation.currentStep && (
+              <div className="space-y-3">
+                <div className="p-6 bg-primary text-primary-foreground rounded-xl">
+                  <h3 className="text-2xl font-bold mb-2">
+                    {navigation.currentStep.instruction}
+                  </h3>
+                  {navigation.distanceToNextStep > 0 && (
+                    <p className="text-lg opacity-90">
+                      {formatDistance(navigation.distanceToNextStep)} kala
+                    </p>
+                  )}
+                </div>
+
+                {/* Next Instruction */}
+                {navigation.nextStep && (
+                  <div className="p-4 bg-muted rounded-lg">
+                    <p className="text-sm text-muted-foreground mb-1">Sıradaki</p>
+                    <p className="text-lg font-semibold">
+                      {navigation.nextStep.instruction}
+                    </p>
+                  </div>
+                )}
+
+                {/* End Navigation Button */}
+                <Button
+                  size="lg"
+                  variant="destructive"
+                  className="w-full"
+                  onClick={async () => {
+                    await navigation.stopNavigation();
+                    setViewMode('ROUTING');
+                  }}
+                >
+                  <X className="mr-2 h-5 w-5" />
+                  Navigasyonu Bitir
+                </Button>
+              </div>
+            )}
+          </div>
+        );
 
       case 'ROUTING':
         return (
@@ -131,15 +200,10 @@ export function ActionSheet() {
                   <Button
                     size="lg"
                     className="flex-1"
-                    onClick={() => {
-                      // Open in external navigation app (Google Maps)
-                      if (destination) {
-                        const url = `https://www.google.com/maps/dir/?api=1&destination=${destination.latitude},${destination.longitude}`;
-                        window.open(url, '_blank');
-                      } else if (selectedStation) {
-                        const url = `https://www.google.com/maps/dir/?api=1&destination=${selectedStation.location.latitude},${selectedStation.location.longitude}`;
-                        window.open(url, '_blank');
-                      }
+                    onClick={async () => {
+                      // Démarrer la navigation dans l'app
+                      setViewMode('NAVIGATION');
+                      await navigation.startNavigation();
                     }}
                   >
                     <Navigation className="mr-2 h-5 w-5" />
@@ -202,6 +266,16 @@ export function ActionSheet() {
   // Determine if we should show expanded content based on snap point
   const isExpanded = activeSnapPoint !== '120px';
   const isMinimized = activeSnapPoint === '120px' || !isOpen;
+
+  // En mode NAVIGATION, masquer le Drawer et afficher les barres de navigation
+  if (viewMode === 'NAVIGATION') {
+    return (
+      <>
+        <NavigationTopBar />
+        <NavigationBottomBar />
+      </>
+    );
+  }
 
   return (
     <>

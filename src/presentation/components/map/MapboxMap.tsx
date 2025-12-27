@@ -10,6 +10,9 @@ import Map, { Marker, Source, Layer } from 'react-map-gl/mapbox';
 import type { MapRef } from 'react-map-gl/mapbox';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { useAppStore } from '@/application/store/useAppStore';
+import { useNavigation } from '@/presentation/hooks/useNavigation';
+import { Button } from '../ui/button';
+import { Navigation2 } from 'lucide-react';
 import type { Station } from '@/domain/types';
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || '';
@@ -22,14 +25,19 @@ export function MapboxMap() {
     route,
     stations,
     selectedStation,
+    viewMode,
     setUserLocation,
     setDestination,
     setSelectedStation,
   } = useAppStore();
 
+  // Hook de navigation pour obtenir le cap de l'utilisateur
+  const navigation = useNavigation();
+
   const [isLoadingLocation, setIsLoadingLocation] = useState(false);
   const [hasInitialized, setHasInitialized] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
+  const [mapLoaded, setMapLoaded] = useState(false);
   
   // Default location: Turkey Center
   const DEFAULT_LOCATION = {
@@ -42,6 +50,8 @@ export function MapboxMap() {
     longitude: DEFAULT_LOCATION.longitude,
     latitude: DEFAULT_LOCATION.latitude,
     zoom: DEFAULT_LOCATION.zoom,
+    pitch: 0,
+    bearing: 0,
   });
 
   // Géolocalisation améliorée au chargement
@@ -52,6 +62,8 @@ export function MapboxMap() {
         longitude: userLocation.longitude,
         latitude: userLocation.latitude,
         zoom: 14,
+        pitch: 0,
+        bearing: 0,
       });
       setHasInitialized(true);
       if (mapRef.current) {
@@ -76,6 +88,8 @@ export function MapboxMap() {
         longitude: DEFAULT_LOCATION.longitude,
         latitude: DEFAULT_LOCATION.latitude,
         zoom: DEFAULT_LOCATION.zoom,
+        pitch: 0,
+        bearing: 0,
       });
       setHasInitialized(true);
       setIsLoadingLocation(false);
@@ -131,6 +145,8 @@ export function MapboxMap() {
                 longitude: location.longitude,
                 latitude: location.latitude,
                 zoom: 14,
+                pitch: 0,
+                bearing: 0,
               });
             } catch (mapError) {
               console.error('❌ Harita animasyon hatası:', mapError);
@@ -139,6 +155,8 @@ export function MapboxMap() {
                 longitude: location.longitude,
                 latitude: location.latitude,
                 zoom: 14,
+                pitch: 0,
+                bearing: 0,
               });
             }
           }
@@ -190,6 +208,8 @@ export function MapboxMap() {
           longitude: DEFAULT_LOCATION.longitude,
           latitude: DEFAULT_LOCATION.latitude,
           zoom: DEFAULT_LOCATION.zoom,
+          pitch: 0,
+          bearing: 0,
         });
 
         // Fly to default location - safely check mapRef
@@ -233,10 +253,69 @@ export function MapboxMap() {
     }
   }, [stations]);
 
-  // Zoom sur la position utilisateur quand elle change
+  // Ajuster la visibilité des bâtiments 3D selon le mode
   useEffect(() => {
-    if (userLocation && !route) {
-      // Only zoom to user location if there's no route
+    if (mapLoaded && mapRef.current) {
+      try {
+        // Accéder à l'instance Mapbox native
+        const map = (mapRef.current as any).getMap ? (mapRef.current as any).getMap() : mapRef.current;
+        const buildingsLayer = map.getLayer('3d-buildings');
+        
+        if (buildingsLayer) {
+          // En mode navigation, rendre les bâtiments plus visibles
+          if (viewMode === 'NAVIGATION') {
+            map.setPaintProperty('3d-buildings', 'fill-extrusion-opacity', 0.8);
+          } else {
+            // En mode normal, réduire l'opacité
+            map.setPaintProperty('3d-buildings', 'fill-extrusion-opacity', 0.4);
+          }
+        }
+      } catch (error) {
+        console.error('❌ Erreur lors de la mise à jour des bâtiments 3D:', error);
+      }
+    }
+  }, [viewMode, mapLoaded]);
+
+  // Suivre l'utilisateur en mode navigation (Driver Camera Mode)
+  useEffect(() => {
+    if (viewMode === 'NAVIGATION' && userLocation && navigation.isNavigationActive) {
+      if (mapRef.current) {
+        try {
+          const bearing = navigation.userHeading !== null ? navigation.userHeading : 0;
+          
+          // Driver Camera Mode: pitch 60, zoom 17.5, bearing selon direction, padding bottom 150
+          mapRef.current.flyTo({
+            center: [userLocation.longitude, userLocation.latitude],
+            zoom: 17.5,
+            pitch: 60,
+            bearing: bearing,
+            duration: 1000, // Animation fluide
+            padding: {
+              top: 0,
+              bottom: 150, // Padding pour voir la route devant
+              left: 0,
+              right: 0,
+            },
+          });
+
+          setViewState({
+            longitude: userLocation.longitude,
+            latitude: userLocation.latitude,
+            zoom: 17.5,
+            pitch: 60,
+            bearing: bearing,
+          });
+        } catch (mapError) {
+          console.error('❌ Harita navigasyon hatası:', mapError);
+        }
+      }
+    }
+  }, [userLocation, viewMode, navigation.isNavigationActive, navigation.userHeading]);
+
+  // Zoom sur la position utilisateur quand elle change (hors mode navigation)
+  useEffect(() => {
+    if (userLocation && !route && viewMode !== 'NAVIGATION') {
+      // Only zoom to user location if there's no route and not in navigation mode
       setTimeout(() => {
         if (mapRef.current) {
           try {
@@ -249,6 +328,8 @@ export function MapboxMap() {
               longitude: userLocation.longitude,
               latitude: userLocation.latitude,
               zoom: 14,
+              pitch: 0,
+              bearing: 0,
             });
           } catch (mapError) {
             console.error('❌ Harita animasyon hatası:', mapError);
@@ -256,12 +337,14 @@ export function MapboxMap() {
               longitude: userLocation.longitude,
               latitude: userLocation.latitude,
               zoom: 14,
+              pitch: 0,
+              bearing: 0,
             });
           }
         }
       }, 100);
     }
-  }, [userLocation, route]);
+  }, [userLocation, route, viewMode]);
 
   // Auto-zoom sur la route quand elle est calculée
   useEffect(() => {
@@ -364,11 +447,127 @@ export function MapboxMap() {
         </div>
       )}
 
+      {/* Bouton Recentrer en mode navigation */}
+      {viewMode === 'NAVIGATION' && userLocation && (
+        <div className="absolute top-20 right-4 z-30">
+          <Button
+            variant="secondary"
+            size="icon"
+            className="rounded-full shadow-lg"
+            onClick={() => {
+              if (mapRef.current && userLocation) {
+                const bearing = navigation.userHeading !== null ? navigation.userHeading : 0;
+                mapRef.current.flyTo({
+                  center: [userLocation.longitude, userLocation.latitude],
+                  zoom: 17.5,
+                  pitch: 60,
+                  bearing: bearing,
+                  duration: 1000,
+                  padding: {
+                    top: 0,
+                    bottom: 150,
+                    left: 0,
+                    right: 0,
+                  },
+                });
+              }
+            }}
+            aria-label="Merkeze dön"
+          >
+            <Navigation2 className="h-5 w-5" />
+          </Button>
+        </div>
+      )}
+
       <Map
         ref={mapRef}
         {...viewState}
-        onMove={(evt) => setViewState(evt.viewState)}
+        onMove={(evt) => {
+          // En mode navigation, ne pas permettre le déplacement manuel
+          if (viewMode !== 'NAVIGATION') {
+            setViewState(evt.viewState);
+          }
+        }}
         onClick={handleMapClick}
+        onLoad={(event) => {
+          const map = event.target;
+          
+          // Ajouter la couche 3D buildings uniquement si elle n'existe pas déjà
+          if (!map.getLayer('3d-buildings')) {
+            // Trouver le premier layer de type 'symbol' (labels) pour insérer avant
+            const layers = map.getStyle().layers;
+            let labelLayerId: string | undefined;
+            
+            // Chercher un layer de type symbol (labels)
+            for (const layer of layers) {
+              if (layer.type === 'symbol') {
+                labelLayerId = layer.id;
+                break;
+              }
+            }
+            
+            // Si aucun label layer trouvé, utiliser le dernier layer
+            if (!labelLayerId && layers.length > 0) {
+              labelLayerId = layers[layers.length - 1].id;
+            }
+            
+            // La source 'composite' est déjà disponible dans le style Mapbox
+            // Ajouter la couche 3D buildings avec un style optimisé pour la navigation
+            map.addLayer(
+              {
+                id: '3d-buildings',
+                source: 'composite',
+                'source-layer': 'building',
+                filter: ['==', ['get', 'extrude'], 'true'],
+                type: 'fill-extrusion',
+                minzoom: 14, // Afficher à partir du zoom 14 pour la navigation
+                paint: {
+                  'fill-extrusion-color': [
+                    'interpolate',
+                    ['linear'],
+                    ['zoom'],
+                    14,
+                    '#d0d0d0', // Gris clair à zoom faible
+                    16,
+                    '#aaa', // Gris moyen à zoom élevé
+                  ],
+                  'fill-extrusion-height': [
+                    'interpolate',
+                    ['linear'],
+                    ['zoom'],
+                    14,
+                    0,
+                    14.05,
+                    ['get', 'height'],
+                  ],
+                  'fill-extrusion-base': [
+                    'interpolate',
+                    ['linear'],
+                    ['zoom'],
+                    14,
+                    0,
+                    14.05,
+                    ['get', 'min_height'],
+                  ],
+                  'fill-extrusion-opacity': [
+                    'interpolate',
+                    ['linear'],
+                    ['zoom'],
+                    14,
+                    0.3, // Plus transparent à zoom faible
+                    16,
+                    0.7, // Plus opaque à zoom élevé (mode navigation)
+                  ],
+                },
+              },
+              labelLayerId
+            );
+            
+            console.log('🏢 Couche 3D buildings ajoutée');
+          }
+          
+          setMapLoaded(true);
+        }}
         mapboxAccessToken={MAPBOX_TOKEN}
         style={{ width: '100%', height: '100%' }}
         mapStyle="mapbox://styles/mapbox/streets-v12"

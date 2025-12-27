@@ -62,6 +62,6 @@ export interface RouteData {
 /**
  * Mode d'affichage de l'application
  */
-export type ViewMode = 'IDLE' | 'ROUTING' | 'STATION_DETAIL';
+export type ViewMode = 'IDLE' | 'ROUTING' | 'STATION_DETAIL' | 'NAVIGATION';
 
 
