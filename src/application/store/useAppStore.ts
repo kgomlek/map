@@ -12,6 +12,7 @@ import type {
 } from '@/domain/types';
 import { fetchNearbyStations, fetchStationsInBounds } from '@/infrastructure/api/ocmClient';
 import { calculateRoute as calculateRouteAPI } from '@/infrastructure/api/mapboxClient';
+import { StationService } from '@/application/services/station-service';
 
 interface AppState {
   // Localisation
@@ -30,6 +31,7 @@ interface AppState {
   viewMode: ViewMode;
   isLoading: boolean;
   error: string | null;
+  isActionSheetOpen: boolean;
 
   // Actions
   setUserLocation: (location: Location) => Promise<void>;
@@ -40,6 +42,7 @@ interface AppState {
   setError: (error: string | null) => void;
   searchNearbyStations: () => Promise<void>;
   navigateToStation: (station: Station) => Promise<void>;
+  setActionSheetOpen: (open: boolean) => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -53,6 +56,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   viewMode: 'IDLE',
   isLoading: false,
   error: null,
+  isActionSheetOpen: false,
 
   // Actions
   setUserLocation: async (location: Location) => {
@@ -60,10 +64,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ userLocation: location, isLoading: true, error: null });
       try {
         const stations = await fetchNearbyStations(location, 50); // 50km radius
-        console.log('✅ Store\'a istasyonlar eklendi:', stations.length);
+        // Trier les stations par distance (plus proche en premier)
+        const sortedStations = StationService.sortByDistance(stations, location);
+        console.log('✅ Store\'a istasyonlar eklendi:', sortedStations.length);
       set({
-        stations,
-        nearbyStations: stations,
+        stations: sortedStations,
+        nearbyStations: sortedStations,
         viewMode: 'IDLE',
         isLoading: false,
       });
@@ -155,10 +161,12 @@ export const useAppStore = create<AppState>((set, get) => ({
             // İstasyonları getir
             try {
               set({ isLoading: true, error: null });
-              const stations = await fetchNearbyStations(location, 10); // 10km radius
+              const stations = await fetchNearbyStations(location, 50); // 50km radius
+              // Trier les stations par distance (plus proche en premier)
+              const sortedStations = StationService.sortByDistance(stations, location);
               set({
-                nearbyStations: stations,
-                stations: stations,
+                nearbyStations: sortedStations,
+                stations: sortedStations,
                 isLoading: false,
               });
               resolve();
@@ -187,10 +195,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     // userLocation varsa direkt istasyonları getir
     set({ isLoading: true, error: null });
     try {
-      const stations = await fetchNearbyStations(location, 10); // 10km radius
+      const stations = await fetchNearbyStations(location, 50); // 50km radius
+      // Trier les stations par distance (plus proche en premier)
+      const sortedStations = StationService.sortByDistance(stations, location);
       set({
-        nearbyStations: stations,
-        stations: stations, // Aynı zamanda stations'ı da güncelle
+        nearbyStations: sortedStations,
+        stations: sortedStations, // Aynı zamanda stations'ı da güncelle
         isLoading: false,
       });
     } catch (error) {
@@ -241,6 +251,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         route: null,
       });
     }
+  },
+
+  setActionSheetOpen: (open: boolean) => {
+    set({ isActionSheetOpen: open });
   },
 }));
 

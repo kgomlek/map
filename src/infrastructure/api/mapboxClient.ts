@@ -7,6 +7,7 @@ import axios from 'axios';
 import type { Location, RouteData } from '@/domain/types';
 
 const MAPBOX_API_URL = 'https://api.mapbox.com/directions/v5/mapbox/driving/';
+const MAPBOX_GEOCODING_URL = 'https://api.mapbox.com/geocoding/v5/mapbox.places/';
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || '';
 
 interface MapboxManeuver {
@@ -24,11 +25,6 @@ interface MapboxStep {
       text: string;
     };
   }>;
-  voiceInstructions?: Array<{
-    announcement?: string;
-    ssmlAnnouncement?: string;
-  }>;
-  name?: string; // Nom de la rue
 }
 
 interface MapboxLeg {
@@ -103,82 +99,18 @@ export async function calculateRoute(
 
     // Map steps from Mapbox response to our format
     const steps = leg?.steps?.map((step) => {
-      // Extract instruction - prioritize voice instructions, then banner, then construct
+      // Extract instruction from banner instructions or construct from maneuver
       let instruction = '';
       
-      // 1. Try voice instructions first (usually more complete)
-      if (step.voiceInstructions && step.voiceInstructions.length > 0) {
-        const voiceInstruction = step.voiceInstructions[0];
-        instruction = voiceInstruction.announcement || voiceInstruction.ssmlAnnouncement || '';
-      }
-      
-      // 2. Try banner instructions
-      if (!instruction && step.bannerInstructions && step.bannerInstructions.length > 0) {
+      if (step.bannerInstructions && step.bannerInstructions.length > 0) {
         instruction = step.bannerInstructions[0].primary.text;
-      }
-      
-      // 3. Try maneuver instruction
-      if (!instruction && step.maneuver.instruction) {
+      } else if (step.maneuver.instruction) {
         instruction = step.maneuver.instruction;
-      }
-      
-      // 4. Construct from maneuver type and modifier
-      if (!instruction) {
+      } else {
+        // Construct instruction from maneuver type and modifier
         const type = step.maneuver.type || '';
         const modifier = step.maneuver.modifier || '';
-        
-        // Map maneuver types to Turkish instructions
-        const typeMap: Record<string, string> = {
-          'turn': 'dön',
-          'merge': 'birleş',
-          'ramp': 'rampa',
-          'roundabout': 'dönel kavşak',
-          'fork': 'ayrıl',
-          'end of road': 'yol sonu',
-          'continue': 'devam et',
-          'new name': 'yeni isim',
-          'depart': 'başla',
-          'arrive': 'varış',
-        };
-        
-        const modifierMap: Record<string, string> = {
-          'left': 'sola',
-          'right': 'sağa',
-          'slight left': 'hafif sola',
-          'slight right': 'hafif sağa',
-          'sharp left': 'sert sola',
-          'sharp right': 'sert sağa',
-          'straight': 'düz',
-          'uturn': 'U dönüşü',
-        };
-        
-        const turkishType = typeMap[type.toLowerCase()] || type;
-        const turkishModifier = modifier ? modifierMap[modifier.toLowerCase()] || modifier : '';
-        
-        if (turkishModifier) {
-          instruction = `${turkishModifier} ${turkishType}`;
-        } else {
-          instruction = turkishType;
-        }
-      }
-      
-      // 5. Enhance instruction with distance if it's too short or doesn't contain distance info
-      // Format distance in Turkish
-      let distanceText = '';
-      if (step.distance < 1000) {
-        distanceText = `${Math.round(step.distance)} metre`;
-      } else {
-        distanceText = `${(step.distance / 1000).toFixed(1)} kilometre`;
-      }
-      
-      // If instruction is very short (less than 10 chars) or doesn't seem complete, add distance
-      if (instruction.length < 10 || (!instruction.includes('metre') && !instruction.includes('kilometre') && !instruction.includes('km') && !instruction.includes('m'))) {
-        instruction = `${distanceText} sonra ${instruction}`;
-      }
-      
-      // Add street name if available
-      if (step.name && !instruction.includes(step.name)) {
-        instruction = `${instruction} ${step.name}`;
+        instruction = `${modifier ? modifier.charAt(0).toUpperCase() + modifier.slice(1) + ' ' : ''}${type}`;
       }
 
       return {
@@ -205,6 +137,85 @@ export async function calculateRoute(
   } catch (error) {
     console.error('Erreur lors du calcul de la route:', error);
     throw new Error('Rota hesaplanamadı');
+  }
+}
+
+/**
+ * Interface pour les résultats de géocodage
+ */
+export interface GeocodingResult {
+  id: string;
+  text: string;
+  place_name: string;
+  center: [number, number]; // [lng, lat]
+}
+
+/**
+ * Interface pour la réponse de l'API Mapbox Geocoding
+ */
+interface MapboxGeocodingResponse {
+  features: Array<{
+    id: string;
+    type: string;
+    place_type: string[];
+    relevance: number;
+    text: string;
+    place_name: string;
+    center: [number, number]; // [lng, lat]
+    geometry: {
+      type: string;
+      coordinates: [number, number];
+    };
+    properties?: Record<string, unknown>;
+  }>;
+}
+
+/**
+ * Recherche de lieux avec l'API Mapbox Geocoding
+ */
+export async function searchPlaces(
+  query: string,
+  userLocation?: Location
+): Promise<GeocodingResult[]> {
+  if (!MAPBOX_TOKEN) {
+    throw new Error('Mapbox token yapılandırılmamış');
+  }
+
+  if (!query || query.trim().length === 0) {
+    return [];
+  }
+
+  try {
+    // Encoder la requête pour l'URL
+    const encodedQuery = encodeURIComponent(query.trim());
+    const url = `${MAPBOX_GEOCODING_URL}${encodedQuery}.json`;
+
+    // Construire les paramètres
+    const params: Record<string, string> = {
+      access_token: MAPBOX_TOKEN,
+      autocomplete: 'true',
+      limit: '5',
+      language: 'tr',
+      country: 'TR', // Limiter les résultats à la Turquie
+    };
+
+    // Ajouter proximity si userLocation est fourni
+    if (userLocation) {
+      params.proximity = `${userLocation.longitude},${userLocation.latitude}`;
+    }
+
+    const response = await axios.get<MapboxGeocodingResponse>(url, { params });
+
+    // Mapper les résultats
+    return response.data.features.map((feature) => ({
+      id: feature.id,
+      text: feature.text,
+      place_name: feature.place_name,
+      center: feature.center, // [lng, lat]
+    }));
+  } catch (error) {
+    console.error('Erreur lors de la recherche de lieux:', error);
+    throw new Error('Yer araması yapılamadı');
   }
 }
 
